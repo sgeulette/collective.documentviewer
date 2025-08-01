@@ -18,8 +18,17 @@ The script accepts buildout command-line options, so you can
 use the -c option to specify an alternate configuration file.
 """
 
-import os, shutil, sys, tempfile, textwrap, urllib, urllib2, subprocess
 from optparse import OptionParser
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
+import urllib
+import urllib2
+
 
 if sys.platform == 'win32':
     def quote(c):
@@ -58,6 +67,8 @@ if not has_broken_dash_S and 'site' in sys.modules:
 # loaded by .pth files.
 clean_path = sys.path[:]
 import site
+
+
 sys.path[:] = clean_path
 for k, v in sys.modules.items():
     if k in ('setuptools', 'pkg_resources') or (
@@ -156,7 +167,7 @@ args.append('bootstrap')
 
 try:
     import pkg_resources
-    import setuptools # A flag.  Sometimes pkg_resources is installed alone.
+    import setuptools  # A flag.  Sometimes pkg_resources is installed alone.
     if not hasattr(pkg_resources, '_distribute'):
         raise ImportError
 except ImportError:
@@ -173,6 +184,7 @@ except ImportError:
     if 'pkg_resources' in sys.modules:
         reload(sys.modules['pkg_resources'])
     import pkg_resources
+
     # This does not (always?) update the default working set.  We will
     # do it.
     for path in sys.path:
@@ -255,6 +267,8 @@ if exitcode != 0:
 ws.add_entry(eggs_dir)
 ws.require(requirement)
 import zc.buildout.buildout
+
+
 zc.buildout.buildout.main(args)
 if not options.eggs: # clean up temporary egg directory
     shutil.rmtree(eggs_dir)

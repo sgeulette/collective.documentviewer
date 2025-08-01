@@ -1,18 +1,20 @@
-from logging import getLogger
-from zope.component import getUtility
-from collective.documentviewer.utils import getPortal
-from collective.documentviewer.settings import Settings
+from collective.documentviewer.convert import Converter
 from collective.documentviewer.convert import runConversion
 from collective.documentviewer.settings import GlobalSettings
-from collective.documentviewer.convert import Converter
+from collective.documentviewer.settings import Settings
+from collective.documentviewer.utils import getPortal
+from logging import getLogger
+from zope.component import getUtility
+
+
 try:
     from zc.async.interfaces import COMPLETED
 except:
     COMPLETED = None
 
-logger = getLogger('collective.documentviewer')
+logger = getLogger("collective.documentviewer")
 
-QUOTA_NAME = 'dv'
+QUOTA_NAME = "dv"
 
 try:
     from plone.app.async.interfaces import IAsyncService
@@ -23,6 +25,7 @@ except ImportError:
 def asyncInstalled():
     try:
         import plone.app.async
+
         return True
     except:
         return False
@@ -47,12 +50,10 @@ class JobRunner(object):
         self.portal = getPortal(obj)
         self.portalpath = self.portal.getPhysicalPath()
         self.async = getUtility(IAsyncService)
-        self.queue = self.async.getQueues()['']
+        self.queue = self.async.getQueues()[""]
 
     def is_current_active(self, job):
-        return isConversion(job, self.portalpath) and \
-            job.args[0] == self.objectpath and \
-            job.status != COMPLETED
+        return isConversion(job, self.portalpath) and job.args[0] == self.objectpath and job.status != COMPLETED
 
     @property
     def already_in_queue(self):
@@ -91,16 +92,13 @@ class JobRunner(object):
         if QUOTA_NAME in self.queue.quotas:
             if self.queue.quotas[QUOTA_NAME].size != size:
                 self.queue.quotas[QUOTA_NAME].size = size
-                logger.info("quota %r configured in queue %r", QUOTA_NAME,
-                            self.queue.name)
+                logger.info("quota %r configured in queue %r", QUOTA_NAME, self.queue.name)
         else:
             self.queue.quotas.create(QUOTA_NAME, size=size)
-            logger.info("quota %r added to queue %r", QUOTA_NAME,
-                        self.queue.name)
+            logger.info("quota %r added to queue %r", QUOTA_NAME, self.queue.name)
 
     def queue_it(self):
-        self.async.queueJobInQueue(self.queue, (QUOTA_NAME,), runConversion,
-                                   self.object)
+        self.async.queueJobInQueue(self.queue, (QUOTA_NAME,), runConversion, self.object)
         settings = Settings(self.object)
         settings.converting = True
 
@@ -143,15 +141,16 @@ def queueJob(obj):
             runner = JobRunner(obj)
             runner.set_quota()
             if runner.already_in_queue:
-                logger.info('object %s already in queue for conversion' % (
-                    repr(obj)))
+                logger.info("object %s already in queue for conversion" % (repr(obj)))
             else:
                 runner.queue_it()
             return
         except:
-            logger.exception("Error using plone.app.async with "
+            logger.exception(
+                "Error using plone.app.async with "
                 "collective.documentviewer. Converting pdf without "
-                "plone.app.async...")
+                "plone.app.async..."
+            )
             converter()
     else:
         converter()

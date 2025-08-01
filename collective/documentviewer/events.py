@@ -1,6 +1,6 @@
-from zope.interface import implements
-from zope.component.interfaces import ObjectEvent
 from collective.documentviewer.interfaces import IConversionFinishedEvent
+from zope.component.interfaces import ObjectEvent
+from zope.interface import implements
 
 
 class ConversionFinishedEvent(ObjectEvent):

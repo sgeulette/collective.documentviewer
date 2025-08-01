@@ -1,9 +1,10 @@
-import os
-import errno
-from Products.CMFCore.utils import getToolByName
-from collective.documentviewer.config import EXTENSION_TO_ID_MAPPING
 from collective.documentviewer.config import CONVERTABLE_TYPES
+from collective.documentviewer.config import EXTENSION_TO_ID_MAPPING
 from collective.documentviewer.interfaces import IFileWrapper
+from Products.CMFCore.utils import getToolByName
+
+import errno
+import os
 
 
 def getDocumentType(obj, allowed_types):
@@ -11,7 +12,7 @@ def getDocumentType(obj, allowed_types):
     if ct is None:
         return None
 
-    mime_registry = getToolByName(obj, 'mimetypes_registry')
+    mime_registry = getToolByName(obj, "mimetypes_registry")
     for _type in mime_registry.lookup(ct):
         for ext in _type.extensions:
             if ext in EXTENSION_TO_ID_MAPPING:
@@ -37,4 +38,4 @@ def mkdir_p(path):
 
 
 def getPortal(obj):
-    return getToolByName(obj, 'portal_url').getPortalObject()
+    return getToolByName(obj, "portal_url").getPortalObject()

@@ -1,30 +1,33 @@
-import subprocess
-import os
-from logging import getLogger
-import shutil
-import tempfile
-import re
-import transaction
-import traceback
-from ZODB.blob import Blob
-from BTrees.OOBTree import OOBTree
 from Acquisition import aq_inner
-from DateTime import DateTime
-from zope.event import notify
-from zope.annotation.interfaces import IAnnotations
+from BTrees.OOBTree import OOBTree
+from collective.documentviewer import storage
+from collective.documentviewer.events import ConversionFinishedEvent
+from collective.documentviewer.interfaces import IFileWrapper
+from collective.documentviewer.interfaces import IOCRLanguage
+from collective.documentviewer.settings import GlobalSettings
+from collective.documentviewer.settings import Settings
+from collective.documentviewer.utils import getDocumentType
 from collective.documentviewer.utils import getPortal
+from collective.documentviewer.utils import mkdir_p
+from DateTime import DateTime
+from logging import getLogger
 from plone.app.blob.utils import openBlob
 from repoze.catalog.catalog import Catalog
-from repoze.catalog.indexes.text import CatalogTextIndex
 from repoze.catalog.indexes.field import CatalogFieldIndex
-from collective.documentviewer.settings import Settings
-from collective.documentviewer.settings import GlobalSettings
-from collective.documentviewer.utils import getDocumentType
-from collective.documentviewer import storage
-from collective.documentviewer.utils import mkdir_p
-from collective.documentviewer.events import ConversionFinishedEvent
-from collective.documentviewer.interfaces import IFileWrapper, IOCRLanguage
+from repoze.catalog.indexes.text import CatalogTextIndex
+from ZODB.blob import Blob
+from zope.annotation.interfaces import IAnnotations
+from zope.event import notify
+
+import os
 import random
+import re
+import shutil
+import subprocess
+import tempfile
+import traceback
+import transaction
+
 
 word_re = re.compile('\W+')
 logger = getLogger('collective.documentviewer')

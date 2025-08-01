@@ -1,57 +1,60 @@
-import random
-from persistent.list import PersistentList
-from persistent.dict import PersistentDict
-from AccessControl import Unauthorized
-import os
-import json
-import shutil
-from logging import getLogger
-from zExceptions import NotFound
-from OFS.SimpleItem import SimpleItem
-from Products.Five.browser import BrowserView
-from DateTime import DateTime
 from AccessControl import getSecurityManager
-from webdav.common import rfc1123_date
-from zope.component import getMultiAdapter
-from zope.interface import implements
-from zope.component import getUtility
-from Products.Five.browser.resource import DirectoryResource
-from Products.Five.browser.resource import Directory
-from zope.publisher.interfaces.browser import IBrowserPublisher
-from zope.annotation.interfaces import IAnnotations
-from zope.i18n import translate
-from Products.CMFCore import permissions
-from Products.CMFCore.utils import getToolByName
-from Products.CMFPlone.utils import base_hasattr
-from repoze.catalog.query import Contains
-from plone.app.blob.download import handleRequestRange
-from plone.app.blob.iterators import BlobStreamIterator
-from plone.app.blob.utils import openBlob
-from z3c.form import form
-from z3c.form import field
-from z3c.form import button
-from plone.app.z3cform.layout import wrap_form
-from Products.CMFPlone import PloneMessageFactory
-from collective.documentviewer.utils import allowedDocumentType
-from collective.documentviewer.interfaces import IDocumentViewerSettings
-from collective.documentviewer.interfaces import IUtils
-from collective.documentviewer.interfaces import IGlobalDocumentViewerSettings
-from collective.documentviewer.settings import Settings
-from collective.documentviewer.settings import GlobalSettings
+from AccessControl import Unauthorized
 from collective.documentviewer import mf as _
+from collective.documentviewer import storage
+from collective.documentviewer.async import asyncInstalled
+from collective.documentviewer.async import isConversion
+from collective.documentviewer.async import JobRunner
+from collective.documentviewer.async import queueJob
+from collective.documentviewer.async import QUOTA_NAME
 from collective.documentviewer.convert import docsplit
 from collective.documentviewer.convert import DUMP_FILENAME
 from collective.documentviewer.convert import TEXT_REL_PATHNAME
-from collective.documentviewer.async import isConversion
-from collective.documentviewer.async import asyncInstalled
-from collective.documentviewer.async import QUOTA_NAME
-from collective.documentviewer.async import queueJob
-from collective.documentviewer.async import JobRunner
-from collective.documentviewer import storage
+from collective.documentviewer.interfaces import IBlobFileWrapper
+from collective.documentviewer.interfaces import IDocumentViewerSettings
+from collective.documentviewer.interfaces import IFileWrapper
+from collective.documentviewer.interfaces import IGlobalDocumentViewerSettings
+from collective.documentviewer.interfaces import IUtils
+from collective.documentviewer.settings import GlobalSettings
+from collective.documentviewer.settings import Settings
+from collective.documentviewer.utils import allowedDocumentType
 from collective.documentviewer.utils import getPortal
-from collective.documentviewer.interfaces import IBlobFileWrapper, IFileWrapper
+from DateTime import DateTime
+from logging import getLogger
+from OFS.SimpleItem import SimpleItem
+from persistent.dict import PersistentDict
+from persistent.list import PersistentList
+from plone.app.blob.download import handleRequestRange
+from plone.app.blob.iterators import BlobStreamIterator
+from plone.app.blob.utils import openBlob
+from plone.app.z3cform.layout import wrap_form
+from Products.CMFCore import permissions
+from Products.CMFCore.utils import getToolByName
+from Products.CMFPlone import PloneMessageFactory
+from Products.CMFPlone.utils import base_hasattr
+from Products.Five.browser import BrowserView
+from Products.Five.browser.resource import Directory
+from Products.Five.browser.resource import DirectoryResource
+from repoze.catalog.query import Contains
+from webdav.common import rfc1123_date
+from z3c.form import button
+from z3c.form import field
+from z3c.form import form
+from zExceptions import NotFound
+from zope.annotation.interfaces import IAnnotations
+from zope.component import getMultiAdapter
+from zope.component import getUtility
+from zope.i18n import translate
+from zope.interface import implements
+from zope.publisher.interfaces.browser import IBrowserPublisher
 
-logger = getLogger('collective.documentviewer')
+import json
+import os
+import random
+import shutil
+
+
+logger = getLogger("collective.documentviewer")
 
 try:
     from plone.app.async.interfaces import IAsyncService
@@ -75,60 +78,60 @@ class DocumentViewerView(BrowserView):
         self.settings = Settings(self.context)
         self.global_settings = GlobalSettings(self.site)
 
-        self.portal_url = getMultiAdapter((self.context, self.request),
-            name="plone_portal_state").portal_url()
-        self.dvstatic = "%s/++resource++dv.resources" % (
-            self.portal_url)
+        self.portal_url = getMultiAdapter((self.context, self.request), name="plone_portal_state").portal_url()
+        self.dvstatic = "%s/++resource++dv.resources" % (self.portal_url)
         resource_url = self.global_settings.override_base_resource_url
-        rel_url = storage.getResourceRelURL(gsettings=self.global_settings,
-                                            settings=self.settings)
+        rel_url = storage.getResourceRelURL(gsettings=self.global_settings, settings=self.settings)
         if resource_url:
-            self.dvpdffiles = '%s/%s' % (resource_url.rstrip('/'), rel_url)
+            self.dvpdffiles = "%s/%s" % (resource_url.rstrip("/"), rel_url)
         else:
-            self.dvpdffiles = '%s/%s' % (self.portal_url, rel_url)
+            self.dvpdffiles = "%s/%s" % (self.portal_url, rel_url)
 
-        utils = getToolByName(self.context, 'plone_utils')
+        utils = getToolByName(self.context, "plone_utils")
         msg = None
         self.enabled = True
 
-        if allowedDocumentType(self.context,
-                self.global_settings.auto_layout_file_types):
+        if allowedDocumentType(self.context, self.global_settings.auto_layout_file_types):
             if not self.installed:
-                msg = _("Since you do not have docsplit installed on this "
-                        "system, we can not render the pages of this document.")
+                msg = _(
+                    "Since you do not have docsplit installed on this "
+                    "system, we can not render the pages of this document."
+                )
 
-            if self.settings.converting is not None and \
-                    self.settings.converting:
+            if self.settings.converting is not None and self.settings.converting:
                 if self.settings.successfully_converted:
                     # there is a version that is already converted, show it.
                     self.enabled = True
-                    msg = _("A new conversion to the Document Viewer "
-                            "is currently being generated for this document."
-                            )
+                    msg = _(
+                        "A new conversion to the Document Viewer " "is currently being generated for this document."
+                    )
                 else:
-                    msg = _("The document is currently being converted to the "
-                            "Document Viewer view.")
+                    msg = _("The document is currently being converted to the " "Document Viewer view.")
                     self.enabled = False
-            elif self.settings.successfully_converted is not None and \
-                    not self.settings.successfully_converted:
-                msg = _("There was an error trying to convert the document. "
-                        "Maybe the document is encrypted, corrupt or "
-                        "malformed? Check log for details.")
+            elif self.settings.successfully_converted is not None and not self.settings.successfully_converted:
+                msg = _(
+                    "There was an error trying to convert the document. "
+                    "Maybe the document is encrypted, corrupt or "
+                    "malformed? Check log for details."
+                )
                 self.enabled = False
             elif self.settings.successfully_converted is None:
                 # must have just switched to this view
-                msg = _("This document is not yet converted to document "
-                        "viewer. Please click the `Document Viewer Convert` "
-                        "button in the actions menu to convert.")
+                msg = _(
+                    "This document is not yet converted to document "
+                    "viewer. Please click the `Document Viewer Convert` "
+                    "button in the actions menu to convert."
+                )
                 self.enabled = False
         else:
             self.enabled = False
-            msg = _("The file is not a supported document type. "
-                    "Your type may be supported. Check out the document "
-                    "viewer configuration settings.")
-        mtool = getToolByName(self.context, 'portal_membership')
-        self.can_modify = mtool.checkPermission('Modify portal content',
-                                                self.context)
+            msg = _(
+                "The file is not a supported document type. "
+                "Your type may be supported. Check out the document "
+                "viewer configuration settings."
+            )
+        mtool = getToolByName(self.context, "portal_membership")
+        self.can_modify = mtool.checkPermission("Modify portal content", self.context)
         if msg and self.can_modify:
             utils.addPortalMessage(_(msg))
 
@@ -142,13 +145,16 @@ class DocumentViewerView(BrowserView):
 
         for page, anns in annotations.items():
             for ann in anns:
-                data.append({
-                    "location": {"image": ann['coord']},
-                    "title": ann['title'],
-                    "id": ann['id'],
-                    "page": page,
-                    "access": "public",
-                    "content": ann['content']})
+                data.append(
+                    {
+                        "location": {"image": ann["coord"]},
+                        "title": ann["title"],
+                        "id": ann["id"],
+                        "page": page,
+                        "access": "public",
+                        "content": ann["content"],
+                    }
+                )
 
         return data
 
@@ -159,17 +165,16 @@ class DocumentViewerView(BrowserView):
         return sections
 
     def dv_data(self):
-        dump_path = DUMP_FILENAME.rsplit('.', 1)[0]
+        dump_path = DUMP_FILENAME.rsplit(".", 1)[0]
         if self.global_settings.override_contributor:
             contributor = self.global_settings.override_contributor
         else:
             contributor = self.context.Creator()
 
-        mtool = getToolByName(self.context, 'portal_membership')
+        mtool = getToolByName(self.context, "portal_membership")
         contributor_user = mtool.getMemberById(contributor)
         if contributor_user is not None:
-            contributor = contributor_user.getProperty('fullname', None) \
-                or contributor
+            contributor = contributor_user.getProperty("fullname", None) or contributor
 
         contributor = '<span class="DV-Contributor">%s</span>' % contributor
 
@@ -187,52 +192,42 @@ class DocumentViewerView(BrowserView):
             image_format = self.global_settings.pdf_image_format
 
         return {
-            'access': 'public',
-            'annotations': self.annotations(),
-            'sections': list(self.sections()),
-            'canonical_url': self.context.absolute_url() + '/view',
-            'created_at': DateTime(self.context.CreationDate()).aCommonZ(),
-            'data': {},
-            'description': self.context.Description(),
-            'id': self.context.UID(),
-            'pages': self.settings.num_pages,
-            'updated_at': DateTime(self.context.ModificationDate()).aCommonZ(),
-            'title': self.context.Title(),
-            'source': '',
+            "access": "public",
+            "annotations": self.annotations(),
+            "sections": list(self.sections()),
+            "canonical_url": self.context.absolute_url() + "/view",
+            "created_at": DateTime(self.context.CreationDate()).aCommonZ(),
+            "data": {},
+            "description": self.context.Description(),
+            "id": self.context.UID(),
+            "pages": self.settings.num_pages,
+            "updated_at": DateTime(self.context.ModificationDate()).aCommonZ(),
+            "title": self.context.Title(),
+            "source": "",
             "contributor": contributor,
             "contributor_organization": organization,
-            'resources': {
-                'page': {
-                    'image': '%s/{size}/%s_{page}.%s' % (
-                        self.dvpdffiles, dump_path,
-                        image_format),
-                    'text': '%s/%s/%s_{page}.txt' % (
-                        self.dvpdffiles, TEXT_REL_PATHNAME, dump_path)
+            "resources": {
+                "page": {
+                    "image": "%s/{size}/%s_{page}.%s" % (self.dvpdffiles, dump_path, image_format),
+                    "text": "%s/%s/%s_{page}.txt" % (self.dvpdffiles, TEXT_REL_PATHNAME, dump_path),
                 },
-                'pdf': self.context.absolute_url(),
-                'thumbnail': '%s/small/%s_1.%s' % (
-                    self.dvpdffiles, dump_path,
-                    image_format),
-                'search': '%s/dv-search.json?q={query}' % (
-                    self.context.absolute_url())
-            }
+                "pdf": self.context.absolute_url(),
+                "thumbnail": "%s/small/%s_1.%s" % (self.dvpdffiles, dump_path, image_format),
+                "search": "%s/dv-search.json?q={query}" % (self.context.absolute_url()),
+            },
         }
 
     def javascript(self):
         fullscreen = self.settings.fullscreen
-        height = 'height: %i,' % either(self.settings.height,
-                                        self.global_settings.height)
-        width = either(self.settings.width,
-                       self.global_settings.width)
+        height = "height: %i," % either(self.settings.height, self.global_settings.height)
+        width = either(self.settings.width, self.global_settings.width)
         if width is None:
             width = "jQuery('#DV-container').width()"
         else:
             width = str(width)
 
-        sidebar = either(self.settings.show_sidebar,
-                         self.global_settings.show_sidebar)
-        search = either(self.settings.show_search,
-                        self.global_settings.show_search)
+        sidebar = either(self.settings.show_sidebar, self.global_settings.show_sidebar)
+        search = either(self.settings.show_search, self.global_settings.show_search)
         return """
 window.documentData = %(data)s;
 var hash = window.location.hash;
@@ -256,18 +251,17 @@ if(hash.search("\#(document|pages|text)\/") != -1 || (%(fullscreen)s &&
     jQuery('body').addClass('not-fullscreen');
 }
 """ % {
-    'portal_url': self.portal_url,
-    'height': height,
-    'fullscreen': str(fullscreen).lower(),
-    'sidebar': str(sidebar).lower(),
-    'search': str(search).lower(),
-    'width': width,
-    'data': json.dumps(self.dv_data())
-}
+            "portal_url": self.portal_url,
+            "height": height,
+            "fullscreen": str(fullscreen).lower(),
+            "sidebar": str(sidebar).lower(),
+            "search": str(search).lower(),
+            "width": width,
+            "data": json.dumps(self.dv_data()),
+        }
 
     def getTranslatedJSLabels(self):
-        """
-        """
+        """ """
         self.request.response.setHeader("Content-type", "application/javascript")
         TEMPLATE = """\
         var dv_translated_label_zoom = '%(dv_translated_label_zoom)s';
@@ -293,40 +287,42 @@ if(hash.search("\#(document|pages|text)\/") != -1 || (%(fullscreen)s &&
         var dv_translated_label_contributed_by = '%(dv_translated_label_contributed_by)s';
         var dv_translated_label_close_fullscreen = '%(dv_translated_label_close_fullscreen)s';
         """
-        d = 'collective.documentviewer'
+        d = "collective.documentviewer"
         r = self.request
-        dv_translated_label_zoom = translate('js_label_zoom', domain=d, context=r, default='Zoom')
-        dv_translated_label_page = translate('js_label_page', domain=d, context=r, default='Page')
-        dv_translated_label_of = translate('js_label_of', domain=d, context=r, default='of')
-        dv_translated_label_document = translate('js_label_document', domain=d, context=r, default='Document')
-        dv_translated_label_pages = translate('js_label_pages', domain=d, context=r, default='Pages')
-        dv_translated_label_notes = translate('js_label_notes', domain=d, context=r, default='Notes')
-        dv_translated_label_loading = translate('js_label_loading', domain=d, context=r, default='Loading')
-        dv_translated_label_text = translate('js_label_text', domain=d, context=r, default='Text')
-        dv_translated_label_search = translate('js_label_search', domain=d, context=r, default='Search')
-        dv_translated_label_for = translate('js_label_for', domain=d, context=r, default='for')
-        dv_translated_label_previous = translate('js_label_previous', domain=d, context=r, default='Previous')
-        dv_translated_label_next = translate('js_label_next', domain=d, context=r, default='Next')
-        dv_translated_label_close = translate('js_label_close', domain=d, context=r, default='Close')
-        dv_translated_label_remove = translate('js_label_remove', domain=d, context=r, default='Remove')
-        dv_translated_label_link_to_note = translate('js_label_link_to_note',
-                                                     domain=d,
-                                                     context=r,
-                                                     default='Link to this note')
-        dv_translated_label_previous_annotation = translate('js_label_previous_annotation',
-                                                            domain=d,
-                                                            context=r,
-                                                            default='Previous annotation')
-        dv_translated_label_next_annotation = translate('js_label_next_annotation',
-                                                        domain=d,
-                                                        context=r,
-                                                        default='Next annotation')
-        dv_translated_label_on_page = translate('js_label_on_page', domain=d, context=r, default='on page')
-        dv_translated_label_for_page = translate('js_label_for_page', domain=d, context=r, default='for page')
-        dv_translated_label_original_document = translate('js_label_original_document', domain=d, context=r, default='Original Document')
-        dv_translated_label_contributed_by = translate('js_label_contributed_by', domain=d, context=r, default='Contributed by:')
-        dv_translated_label_close_fullscreen = translate('js_label_close_fullscreen', domain=d, context=r, default='Close Fullscreen')
-
+        dv_translated_label_zoom = translate("js_label_zoom", domain=d, context=r, default="Zoom")
+        dv_translated_label_page = translate("js_label_page", domain=d, context=r, default="Page")
+        dv_translated_label_of = translate("js_label_of", domain=d, context=r, default="of")
+        dv_translated_label_document = translate("js_label_document", domain=d, context=r, default="Document")
+        dv_translated_label_pages = translate("js_label_pages", domain=d, context=r, default="Pages")
+        dv_translated_label_notes = translate("js_label_notes", domain=d, context=r, default="Notes")
+        dv_translated_label_loading = translate("js_label_loading", domain=d, context=r, default="Loading")
+        dv_translated_label_text = translate("js_label_text", domain=d, context=r, default="Text")
+        dv_translated_label_search = translate("js_label_search", domain=d, context=r, default="Search")
+        dv_translated_label_for = translate("js_label_for", domain=d, context=r, default="for")
+        dv_translated_label_previous = translate("js_label_previous", domain=d, context=r, default="Previous")
+        dv_translated_label_next = translate("js_label_next", domain=d, context=r, default="Next")
+        dv_translated_label_close = translate("js_label_close", domain=d, context=r, default="Close")
+        dv_translated_label_remove = translate("js_label_remove", domain=d, context=r, default="Remove")
+        dv_translated_label_link_to_note = translate(
+            "js_label_link_to_note", domain=d, context=r, default="Link to this note"
+        )
+        dv_translated_label_previous_annotation = translate(
+            "js_label_previous_annotation", domain=d, context=r, default="Previous annotation"
+        )
+        dv_translated_label_next_annotation = translate(
+            "js_label_next_annotation", domain=d, context=r, default="Next annotation"
+        )
+        dv_translated_label_on_page = translate("js_label_on_page", domain=d, context=r, default="on page")
+        dv_translated_label_for_page = translate("js_label_for_page", domain=d, context=r, default="for page")
+        dv_translated_label_original_document = translate(
+            "js_label_original_document", domain=d, context=r, default="Original Document"
+        )
+        dv_translated_label_contributed_by = translate(
+            "js_label_contributed_by", domain=d, context=r, default="Contributed by:"
+        )
+        dv_translated_label_close_fullscreen = translate(
+            "js_label_close_fullscreen", domain=d, context=r, default="Close Fullscreen"
+        )
 
         # escape_for_js
         dv_translated_label_zoom = dv_translated_label_zoom.replace("'", "\\'")
@@ -383,22 +379,19 @@ try:
             self._update()
             self.update()
             return super(DXDocumentViewerView, self).__call__()
+
 except ImportError:
     pass
 
 
 class DocumentViewerSearchView(BrowserView):
-
     def __call__(self):
         settings = Settings(self.context)
         catalog = settings.catalog
-        query = self.request.form.get('q')
+        query = self.request.form.get("q")
         if catalog:
-            results = catalog.query(Contains('text', query))
-            return json.dumps({
-                "results": list(results[1]),
-                "query": query
-                })
+            results = catalog.query(Contains("text", query))
+            return json.dumps({"results": list(results[1]), "query": query})
 
         return json.dumps({"results": [], "query": query})
 
@@ -407,14 +400,15 @@ class SettingsForm(form.EditForm):
     """
     The page that holds all the slider settings
     """
+
     fields = field.Fields(IDocumentViewerSettings)
 
-    label = _(u'heading_documentviewer_settings_form',
-        default=u"Document Viewer Settings")
-    description = _(u'description_documentviewer_settings_form',
-        default=u"These settings override the global settings.")
+    label = _(u"heading_documentviewer_settings_form", default=u"Document Viewer Settings")
+    description = _(
+        u"description_documentviewer_settings_form", default=u"These settings override the global settings."
+    )
 
-    @button.buttonAndHandler(_('Save'), name='apply')
+    @button.buttonAndHandler(_("Save"), name="apply")
     def handleApply(self, action):
         data, errors = self.extractData()
         if errors:
@@ -423,11 +417,11 @@ class SettingsForm(form.EditForm):
 
         self.applyChanges(data)
 
-        url = getMultiAdapter((self.context, self.request),
-            name='absolute_url')() + '/view'
+        url = getMultiAdapter((self.context, self.request), name="absolute_url")() + "/view"
         self.request.response.redirect(url)
 
-        self.context.plone_utils.addPortalMessage(PloneMessageFactory('Changes saved.'))
+        self.context.plone_utils.addPortalMessage(PloneMessageFactory("Changes saved."))
+
 
 SettingsFormView = wrap_form(SettingsForm)
 
@@ -435,12 +429,12 @@ SettingsFormView = wrap_form(SettingsForm)
 class GlobalSettingsForm(form.EditForm):
     fields = field.Fields(IGlobalDocumentViewerSettings)
 
-    label = _(u'heading_documentviewer_global_settings_form',
-        default=u"Global Document Viewer Settings")
-    description = _(u'description_documentviewer_global_settings_form',
-        default=u"Configure the parameters for this Viewer.")
+    label = _(u"heading_documentviewer_global_settings_form", default=u"Global Document Viewer Settings")
+    description = _(
+        u"description_documentviewer_global_settings_form", default=u"Configure the parameters for this Viewer."
+    )
 
-    @button.buttonAndHandler(_('Save'), name='apply')
+    @button.buttonAndHandler(_("Save"), name="apply")
     def handleApply(self, action):
         data, errors = self.extractData()
         if errors:
@@ -449,7 +443,8 @@ class GlobalSettingsForm(form.EditForm):
 
         self.applyChanges(data)
 
-        self.status = PloneMessageFactory('Changes saved.')
+        self.status = PloneMessageFactory("Changes saved.")
+
 
 GlobalSettingsFormView = wrap_form(GlobalSettingsForm)
 
@@ -461,19 +456,19 @@ class Utils(BrowserView):
         try:
             fw = IFileWrapper(self.context)
             if fw.has_enclosure:
-                if self.context.getLayout() == 'documentviewer':
+                if self.context.getLayout() == "documentviewer":
                     return True
                 else:
-                    return allowedDocumentType(self.context,
-                        GlobalSettings(
-                            getPortal(self.context)).auto_layout_file_types)
+                    return allowedDocumentType(
+                        self.context, GlobalSettings(getPortal(self.context)).auto_layout_file_types
+                    )
             else:
                 return False
         except:
             return False
 
     def settings_enabled(self):
-        return self.context.getLayout() == 'documentviewer'
+        return self.context.getLayout() == "documentviewer"
 
     def async_enabled(self):
         return asyncInstalled()
@@ -485,10 +480,9 @@ class Utils(BrowserView):
         for foldername in os.listdir(storage_loc):
             if len(foldername) == 1:
                 # we're in a container, check inside
-                count += self.clean_folder(catalog,
-                    os.path.join(storage_loc, foldername))
+                count += self.clean_folder(catalog, os.path.join(storage_loc, foldername))
             else:
-                #foldername should be file uid
+                # foldername should be file uid
                 brains = catalog(UID=foldername)
                 folderpath = os.path.join(storage_loc, foldername)
                 if len(brains) == 0:
@@ -497,18 +491,17 @@ class Utils(BrowserView):
                 else:
                     obj = brains[0].getObject()
                     settings = Settings(obj)
-                    if obj.getLayout() != 'documentviewer':
+                    if obj.getLayout() != "documentviewer":
                         if not settings.converting:
                             shutil.rmtree(folderpath)
                             count += 1
                             # also delete settings
                             annotations = IAnnotations(obj)
-                            data = annotations.get('collective.documentviewer',
-                                                   None)
+                            data = annotations.get("collective.documentviewer", None)
                             if data:
-                                del annotations['collective.documentviewer']
+                                del annotations["collective.documentviewer"]
 
-                    elif settings.storage_type == 'Blob':
+                    elif settings.storage_type == "Blob":
                         shutil.rmtree(folderpath)
                         count += 1
         return count
@@ -526,13 +519,12 @@ class Utils(BrowserView):
         if not os.path.exists(storage_loc):
             return 'storage location path "%s" does not exist' % storage_loc
 
-        catalog = getToolByName(self.context, 'portal_catalog')
+        catalog = getToolByName(self.context, "portal_catalog")
         number = self.clean_folder(catalog, storage_loc)
-        return 'cleaned %i' % number
+        return "cleaned %i" % number
 
 
 class Convert(Utils):
-
     def __call__(self):
         """
         - handle queuing
@@ -540,31 +532,27 @@ class Convert(Utils):
         - async
             - queue position
         """
-        mtool = getToolByName(self.context, 'portal_membership')
-        self.manager = mtool.checkPermission('cmf.ManagePortal',
-                                             self.context)
+        mtool = getToolByName(self.context, "portal_membership")
+        self.manager = mtool.checkPermission("cmf.ManagePortal", self.context)
         self.async_installed = asyncInstalled()
         self.converting = False
         if self.enabled():
             req = self.request
-            if req.get('REQUEST_METHOD', 'POST') and \
-               'form.action.queue' in req.form.keys():
-                authenticator = getMultiAdapter((self.context, self.request),
-                                                name=u"authenticator")
+            if req.get("REQUEST_METHOD", "POST") and "form.action.queue" in req.form.keys():
+                authenticator = getMultiAdapter((self.context, self.request), name=u"authenticator")
                 if not authenticator.verify():
                     raise Unauthorized
 
                 settings = Settings(self.context)
-                settings.last_updated = DateTime('1999/01/01').ISO8601()
-                settings.filehash = '--foobar--'
+                settings.last_updated = DateTime("1999/01/01").ISO8601()
+                settings.filehash = "--foobar--"
                 queueJob(self.context)
                 self.converting = True
                 if self.async_installed:
                     self.position = JobRunner(self.context).find_position()
                     queueJob(self.context)
                 else:
-                    return self.request.response.redirect(
-                        self.context.absolute_url() + '/view')
+                    return self.request.response.redirect(self.context.absolute_url() + "/view")
             else:
                 if self.async_installed:
                     self.position = JobRunner(self.context).find_position()
@@ -573,11 +561,10 @@ class Convert(Utils):
 
             return super(Convert, self).__call__()
 
-        self.request.response.redirect(self.context.absolute_url() + '/view')
+        self.request.response.redirect(self.context.absolute_url() + "/view")
 
 
 class BlobView(BrowserView):
-
     def __call__(self):
         sm = getSecurityManager()
         if not sm.checkPermission(permissions.View, self.context.context):
@@ -590,20 +577,16 @@ class BlobView(BrowserView):
         length = os.fstat(blobfi.fileno()).st_size
         blobfi.close()
         ext = os.path.splitext(os.path.normcase(filepath))[1][1:]
-        if ext == 'txt':
-            ct = 'text/plain'
+        if ext == "txt":
+            ct = "text/plain"
         else:
-            ct = 'image/%s' % ext
+            ct = "image/%s" % ext
 
-        self.request.response.setHeader('Last-Modified',
-                                        rfc1123_date(self.context._p_mtime))
-        self.request.response.setHeader('Accept-Ranges', 'bytes')
+        self.request.response.setHeader("Last-Modified", rfc1123_date(self.context._p_mtime))
+        self.request.response.setHeader("Accept-Ranges", "bytes")
         self.request.response.setHeader("Content-Length", length)
-        self.request.response.setHeader('Content-Type', ct)
-        request_range = handleRequestRange(self.context,
-                                   length,
-                                   self.request,
-                                   self.request.response)
+        self.request.response.setHeader("Content-Type", ct)
+        request_range = handleRequestRange(self.context, length, self.request, self.request.response)
         return BlobStreamIterator(blob, **request_range)
 
 
@@ -617,13 +600,14 @@ class BlobFileWrapper(SimpleItem):
         self.request = request
 
     def browserDefault(self, request):
-        return self, ('@@view',)
+        return self, ("@@view",)
 
 
 class PDFTraverseBlobFile(SimpleItem):
     """
     For traversing blob data store
     """
+
     implements(IBrowserPublisher)
 
     def __init__(self, fileobj, settings, request, previous=None):
@@ -633,13 +617,10 @@ class PDFTraverseBlobFile(SimpleItem):
         self.previous = previous
 
     def publishTraverse(self, request, name):
-        if name not in ('large', 'normal', 'small', 'text'):
-            filepath = '%s/%s' % (self.previous, name)
+        if name not in ("large", "normal", "small", "text"):
+            filepath = "%s/%s" % (self.previous, name)
             if filepath in self.settings.blob_files:
-                return BlobFileWrapper(self.context,
-                                       self.settings,
-                                       filepath,
-                                       self.request).__of__(self.context)
+                return BlobFileWrapper(self.context, self.settings, filepath, self.request).__of__(self.context)
             else:
                 raise NotFound
         else:
@@ -647,14 +628,13 @@ class PDFTraverseBlobFile(SimpleItem):
                 # shouldn't be traversing this deep
                 raise NotFound
 
-            fi = PDFTraverseBlobFile(self.context, self.settings,
-                                     request, name)
+            fi = PDFTraverseBlobFile(self.context, self.settings, request, name)
             fi.__parent__ = self
             return fi.__of__(self)
 
     def browserDefault(self, request):
-        '''See interface IBrowserPublisher'''
-        return lambda: '', ()
+        """See interface IBrowserPublisher"""
+        return lambda: "", ()
 
 
 _marker = object()
@@ -662,10 +642,9 @@ _marker = object()
 
 class RequestMemo(object):
 
-    key = 'plone.memoize_request'
+    key = "plone.memoize_request"
 
     def __call__(self, func):
-
         def memogetter(*args, **kwargs):
             request = args[0]
 
@@ -680,6 +659,7 @@ class RequestMemo(object):
             if value is _marker:
                 value = cache[key] = func(*args, **kwargs)
             return value
+
         return memogetter
 
 
@@ -695,13 +675,11 @@ class PDFFiles(SimpleItem, DirectoryResource):
         SimpleItem.__init__(self, context, request)
         self.previous = previous
 
-        self.__name__ = 'dvpdffiles'
+        self.__name__ = "dvpdffiles"
         self.site = _getPortal(request, context)
         self.global_settings = GlobalSettings(self.site)
         self.storage_type = self.global_settings.storage_type
-        self.__dir = Directory(
-            os.path.join(self.global_settings.storage_location, *previous),
-            self.__name__)
+        self.__dir = Directory(os.path.join(self.global_settings.storage_location, *previous), self.__name__)
 
         DirectoryResource.__init__(self, self.__dir, request)
 
@@ -721,24 +699,23 @@ class PDFFiles(SimpleItem, DirectoryResource):
             files.__parent__ = self
             return files.__of__(self)
 
-        if len(self.previous) == 2 and (self.previous[0] != name[0] or
-           self.previous[1] != name[1:2]):
+        if len(self.previous) == 2 and (self.previous[0] != name[0] or self.previous[1] != name[1:2]):
             # make sure the first two were a sub-set of the uid
             raise NotFound
 
-#        uidcat = getToolByName(self.site, 'uid_catalog')
-#        brains = uidcat(UID=name)
-#        Dexterity items are not indexed in uid_catalog
-        cat = getToolByName(self.site, 'portal_catalog')
+        #        uidcat = getToolByName(self.site, 'uid_catalog')
+        #        brains = uidcat(UID=name)
+        #        Dexterity items are not indexed in uid_catalog
+        cat = getToolByName(self.site, "portal_catalog")
         brains = cat.unrestrictedSearchResults(UID=name)
         if len(brains) == 0:
             raise NotFound
 
-#        fileobj = brains[0].getObject()
-#        getObject raise Unauthorized because we are Anonymous in the traverser
+        #        fileobj = brains[0].getObject()
+        #        getObject raise Unauthorized because we are Anonymous in the traverser
         fileobj = brains[0]._unrestrictedGetObject()
         settings = Settings(fileobj)
-        if settings.storage_type == 'Blob':
+        if settings.storage_type == "Blob":
             fi = PDFTraverseBlobFile(fileobj, settings, request)
             fi.__parent__ = self
             return fi.__of__(self)
@@ -756,45 +733,43 @@ class PDFFiles(SimpleItem, DirectoryResource):
 
 
 class GroupView(BrowserView):
-
-    def getContents(self, object=None, portal_type=('File',),
-                    full_objects=False, path=None):
+    def getContents(self, object=None, portal_type=("File",), full_objects=False, path=None):
         if not object:
             object = self.context
 
-        opts = {'portal_type': portal_type}
+        opts = {"portal_type": portal_type}
         if path:
-            opts['path'] = path
+            opts["path"] = path
 
-        if 'q' in self.request.form and self.search_enabled:
-            opts['SearchableText'] = self.request.form['q']
+        if "q" in self.request.form and self.search_enabled:
+            opts["SearchableText"] = self.request.form["q"]
 
-        if object.portal_type == 'Topic':
+        if object.portal_type == "Topic":
             res = object.queryCatalog(self.request, batch=True, **opts)
         else:
-            opts['sort_on'] = 'getObjPositionInParent'
-            res = object.getFolderContents(contentFilter=opts,
-                                           batch=True, b_size=self.b_size,
-                                           full_objects=full_objects)
+            opts["sort_on"] = "getObjPositionInParent"
+            res = object.getFolderContents(
+                contentFilter=opts, batch=True, b_size=self.b_size, full_objects=full_objects
+            )
         return res
 
-    def results(self, portal_type=('File',)):
-        types = ('Folder', 'Large Plone Folder') + portal_type
+    def results(self, portal_type=("File",)):
+        types = ("Folder", "Large Plone Folder") + portal_type
         return self.getContents(portal_type=types)
 
-    def get_files(self, obj, portal_type=('File',)):
-        #Handle brains or objects
-        if base_hasattr(obj, 'getPath'):
+    def get_files(self, obj, portal_type=("File",)):
+        # Handle brains or objects
+        if base_hasattr(obj, "getPath"):
             path = obj.getPath()
         else:
-            path = '/'.join(obj.getPhysicalPath())
+            path = "/".join(obj.getPhysicalPath())
 
         # Explicitly set path to remove default depth
         return self.getContents(object=obj, portal_type=portal_type, path=path)
 
     @property
     def b_size(self):
-        if self.context.portal_type == 'Topic':
+        if self.context.portal_type == "Topic":
             if self.context.getLimitNumber():
                 return self.context.getItemCount()
 
@@ -805,11 +780,10 @@ class GroupView(BrowserView):
         self.global_settings = GlobalSettings(self.site)
         self.search_enabled = self.global_settings.show_search_on_group_view
 
-        self.portal_url = getMultiAdapter((self.context, self.request),
-            name="plone_portal_state").portal_url()
-        self.static_url = '%s/++resource++dv.resources' % (self.portal_url)
+        self.portal_url = getMultiAdapter((self.context, self.request), name="plone_portal_state").portal_url()
+        self.static_url = "%s/++resource++dv.resources" % (self.portal_url)
         self.resource_url = self.global_settings.override_base_resource_url
-        self.dump_path = DUMP_FILENAME.rsplit('.', 1)[0]
+        self.dump_path = DUMP_FILENAME.rsplit(".", 1)[0]
         return super(GroupView, self).__call__()
 
     def get_thumb(self, obj):
@@ -818,25 +792,23 @@ class GroupView(BrowserView):
 
         resource_rel = storage.getResourceRelURL(obj=obj)
         if self.resource_url:
-            dvpdffiles = '%s/%s' % (self.resource_url.rstrip('/'),
-                                    resource_rel)
+            dvpdffiles = "%s/%s" % (self.resource_url.rstrip("/"), resource_rel)
         else:
-            dvpdffiles = '%s/%s' % (self.portal_url, resource_rel)
+            dvpdffiles = "%s/%s" % (self.portal_url, resource_rel)
 
-        if obj.portal_type == 'File':
+        if obj.portal_type == "File":
             settings = Settings(obj)
             if settings.successfully_converted:
                 image_format = settings.pdf_image_format
                 if not image_format:
                     image_format = self.global_settings.pdf_image_format
 
-                return '%s/small/%s_1.%s' % (dvpdffiles, self.dump_path,
-                                             image_format)
+                return "%s/small/%s_1.%s" % (dvpdffiles, self.dump_path, image_format)
             else:
-                return '%s/images/pdf.png' % (self.static_url)
-        elif obj.portal_type == 'Image':
+                return "%s/images/pdf.png" % (self.static_url)
+        elif obj.portal_type == "Image":
             url = obj.absolute_url()
-            return '%s/image_thumb' % url
+            return "%s/image_thumb" % url
 
 
 class AsyncMonitor(BrowserView):
@@ -845,7 +817,7 @@ class AsyncMonitor(BrowserView):
     """
 
     def time_since(self, dt):
-        now = DateTime('UTC')
+        now = DateTime("UTC")
         diff = now - dt
 
         secs = int(diff * 24 * 60 * 60)
@@ -854,28 +826,28 @@ class AsyncMonitor(BrowserView):
         days = hours / 24
 
         if days:
-            return '%i day%s' % (days, days > 1 and 's' or '')
+            return "%i day%s" % (days, days > 1 and "s" or "")
         elif hours:
-            return '%i hour%s' % (hours, hours > 1 and 's' or '')
+            return "%i hour%s" % (hours, hours > 1 and "s" or "")
         elif minutes:
-            return '%i minute%s' % (minutes, minutes > 1 and 's' or '')
+            return "%i minute%s" % (minutes, minutes > 1 and "s" or "")
         else:
-            return '%i second%s' % (secs, secs > 1 and 's' or '')
+            return "%i second%s" % (secs, secs > 1 and "s" or "")
 
     def get_job_data(self, job, sitepath, removable=True):
         lastused = DateTime(job._p_mtime)
-        if job.status != 'pending-status':
+        if job.status != "pending-status":
             timerunning = self.time_since(lastused)
         else:
-            timerunning = '-'
+            timerunning = "-"
 
         return {
-            'status': job.status,
-            'user': job.args[3],
-            'object_path': '/'.join(job.args[0][len(sitepath):]),
-            'lastused': lastused.toZone('UTC').pCommon(),
-            'timerunning': timerunning,
-            'removable': removable
+            "status": job.status,
+            "user": job.args[3],
+            "object_path": "/".join(job.args[0][len(sitepath) :]),
+            "lastused": lastused.toZone("UTC").pCommon(),
+            "timerunning": timerunning,
+            "removable": removable,
         }
 
     @property
@@ -884,7 +856,7 @@ class AsyncMonitor(BrowserView):
         if asyncInstalled():
             sitepath = self.context.getPhysicalPath()
             async = getUtility(IAsyncService)
-            queue = async.getQueues()['']
+            queue = async.getQueues()[""]
             quota = queue.quotas[QUOTA_NAME]
 
             for job in quota._data:
@@ -899,26 +871,23 @@ class AsyncMonitor(BrowserView):
         return results
 
     def redirect(self):
-        return self.request.response.redirect("%s/@@dvasync-monitor" % (
-            self.context.absolute_url()))
+        return self.request.response.redirect("%s/@@dvasync-monitor" % (self.context.absolute_url()))
 
     def move(self):
         pass
 
     def remove(self):
-        if self.request.get('REQUEST_METHOD', 'POST') and \
-                self.request.form.get('form.action.remove', '') == 'Remove':
-            authenticator = getMultiAdapter((self.context, self.request),
-                                            name=u"authenticator")
+        if self.request.get("REQUEST_METHOD", "POST") and self.request.form.get("form.action.remove", "") == "Remove":
+            authenticator = getMultiAdapter((self.context, self.request), name=u"authenticator")
             if not authenticator.verify():
                 raise Unauthorized
 
             # find the job
             sitepath = self.context.getPhysicalPath()
             async = getUtility(IAsyncService)
-            queue = async.getQueues()['']
+            queue = async.getQueues()[""]
 
-            objpath = self.request.form.get('path')
+            objpath = self.request.form.get("path")
             obj = self.context.restrictedTraverse(str(objpath), None)
             if obj is None:
                 return self.redirect()
@@ -927,8 +896,7 @@ class AsyncMonitor(BrowserView):
 
             jobs = [job for job in queue]
             for job in jobs:
-                if isConversion(job, sitepath) and \
-                        job.args[0] == objpath:
+                if isConversion(job, sitepath) and job.args[0] == objpath:
                     try:
                         queue.remove(job)
                         settings = Settings(obj)
@@ -942,23 +910,18 @@ class AsyncMonitor(BrowserView):
 
 
 class MoveJob(BrowserView):
-
     def __call__(self):
-        if self.request.get('REQUEST_METHOD', 'POST') and \
-                self.request.form.get('form.action.move', False):
-            authenticator = getMultiAdapter((self.context, self.request),
-                                            name=u"authenticator")
+        if self.request.get("REQUEST_METHOD", "POST") and self.request.form.get("form.action.move", False):
+            authenticator = getMultiAdapter((self.context, self.request), name=u"authenticator")
             if not authenticator.verify():
                 raise Unauthorized
 
             JobRunner(self.context).move_to_front()
 
-        return self.request.response.redirect(
-            self.context.absolute_url() + '/@@convert-to-documentviewer')
+        return self.request.response.redirect(self.context.absolute_url() + "/@@convert-to-documentviewer")
 
 
 class Annotate(BrowserView):
-
     def __call__(self):
         req = self.request
         settings = Settings(self.context)
@@ -972,45 +935,40 @@ class Annotate(BrowserView):
             sections = PersistentList()
             settings.sections = sections
 
-        action = req.form['action']
-        if action == 'addannotation':
-            page = int(req.form['page'])
+        action = req.form["action"]
+        if action == "addannotation":
+            page = int(req.form["page"])
             if page not in annotations:
                 annotations[page] = PersistentList()
 
             pageann = annotations[page]
             data = {
                 "id": random.randint(1, 9999999),
-                "coord": req.form['coord'],
-                "title": req.form.get('title', ''),
-                "content": req.form.get('content', '')}
+                "coord": req.form["coord"],
+                "title": req.form.get("title", ""),
+                "content": req.form.get("content", ""),
+            }
             pageann.append(data)
             return json.dumps(data)
-        elif action == 'removeannotation':
-            page = int(req.form['page'])
+        elif action == "removeannotation":
+            page = int(req.form["page"])
             if page in annotations:
-                ann_id = int(req.form['id'])
+                ann_id = int(req.form["id"])
                 found = False
                 annotations = annotations[page]
                 for ann in annotations:
-                    if ann['id'] == ann_id:
+                    if ann["id"] == ann_id:
                         found = ann
                         break
 
                 if found:
                     annotations.remove(found)
 
-        elif action == 'addsection':
-            data = {
-                'page': req.form['page'],
-                'title': req.form['title']
-            }
+        elif action == "addsection":
+            data = {"page": req.form["page"], "title": req.form["title"]}
             sections.append(data)
             return json.dumps(data)
-        elif action == 'removesection':
-            data = {
-                'page': req.form['page'],
-                'title': req.form['title']
-            }
+        elif action == "removesection":
+            data = {"page": req.form["page"], "title": req.form["title"]}
             if data in sections:
                 sections.remove(data)

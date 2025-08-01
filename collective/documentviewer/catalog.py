@@ -1,5 +1,5 @@
-from plone.indexer import indexer
 from collective.documentviewer.settings import Settings
+from plone.indexer import indexer
 
 
 def SearchableTextIndexer(obj):
@@ -8,16 +8,17 @@ def SearchableTextIndexer(obj):
     provide the ocr'd text
     """
     text = obj.SearchableText()
-    if obj.getLayout() != 'documentviewer':
+    if obj.getLayout() != "documentviewer":
         return text
 
     settings = Settings(obj)
     catalog = settings.catalog
     if catalog is not None:
-        index = catalog['text'].index
-        return [text, ' '.join(index._lexicon.words())]
+        index = catalog["text"].index
+        return [text, " ".join(index._lexicon.words())]
     else:
         return text
+
 
 try:
     from Products.ATContentTypes.interface import IFileContent
@@ -25,6 +26,7 @@ try:
     @indexer(IFileContent)
     def SearchableTextArchetypes(obj):
         return SearchableTextIndexer(obj)
+
 except ImportError:
     pass
 
@@ -34,5 +36,6 @@ try:
     @indexer(IDexterityContent)
     def SearchableTextDexterity(obj):
         return SearchableTextIndexer(obj)
+
 except ImportError:
     pass

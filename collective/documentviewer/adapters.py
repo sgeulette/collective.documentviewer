@@ -1,41 +1,52 @@
-import os
-
-import zope.interface
-from zope.cachedescriptors.property import Lazy as lazy_property
-from zope.component import adapts
-from zope.interface import implements, Interface
-
+from collective.documentviewer.interfaces import IFileWrapper
+from collective.documentviewer.interfaces import IOCRLanguage
+from collective.documentviewer.iso639_2_utf8 import ISO_UTF_MAP
 from OFS.interfaces import IItem
 from Products.CMFCore.utils import getToolByName
+from zope.cachedescriptors.property import Lazy as lazy_property
+from zope.component import adapts
+from zope.interface import implements
+from zope.interface import Interface
 
-from collective.documentviewer.interfaces import IFileWrapper, IOCRLanguage
-from collective.documentviewer.iso639_2_utf8 import ISO_UTF_MAP
+import os
+import zope.interface
+
 
 try:
     from Products.ATContentTypes.interface.file import IFileContent
 except ImportError:
+
     class IFileContent(Interface):
         pass
+
+
 try:
     from plone.dexterity.interfaces import IDexterityContent
 except ImportError:
+
     class IDexterityContent(Interface):
         pass
+
+
 try:
     from plone.rfc822.interfaces import IPrimaryFieldInfo
 except ImportError:
+
     class IPrimaryFieldInfo(Interface):
         pass
+
+
 try:
     from plone.namedfile.interfaces import INamedField
 except ImportError:
+
     class INamedField(Interface):
         pass
 
 
 class StandardOCRLanguageAdapter(object):
-    """ Return the document language through a configurable
-        adapter.
+    """Return the document language through a configurable
+    adapter.
     """
 
     adapts(IItem)
@@ -45,17 +56,17 @@ class StandardOCRLanguageAdapter(object):
         self.context = context
 
     def getLanguage(self):
-        """ Return OCR language as 3-char language code """
+        """Return OCR language as 3-char language code"""
 
         # First sniff into $OCR_LANGUAGE environment variable
-        lang = os.environ.get('OCR_LANGUAGE')
+        lang = os.environ.get("OCR_LANGUAGE")
         if lang is not None:
             return lang
 
         # fallback to site language
-        lt = getToolByName(self.context, 'portal_languages')
+        lt = getToolByName(self.context, "portal_languages")
         lang = lt.getPreferredLanguage()
-        return ISO_UTF_MAP.get(lang, 'eng')
+        return ISO_UTF_MAP.get(lang, "eng")
 
 
 class BaseItem(object):
@@ -71,7 +82,7 @@ class BaseItem(object):
 
     @lazy_property
     def _field(self):
-        return self.context.getField('file') or self.context.getPrimaryField()
+        return self.context.getField("file") or self.context.getPrimaryField()
 
     @lazy_property
     def file(self):
