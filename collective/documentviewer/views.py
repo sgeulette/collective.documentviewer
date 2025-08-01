@@ -236,6 +236,7 @@ window.initializeDV = function(){
     window.currentDocument = DV.load(window.documentData, { %(height)s
         sidebar: %(sidebar)s,
         width: %(width)s,
+        zoom: %(zoom)s,
         search: %(search)s,
         container: '#DV-container' });
 }
@@ -243,6 +244,7 @@ if(hash.search("\#(document|pages|text)\/") != -1 || (%(fullscreen)s &&
         hash != '#bypass-fullscreen')){
     window.currentDocument = DV.load(window.documentData, {
         sidebar: true,
+        zoom: %(zoom)s,
         search: %(search)s,
         container: document.body });
     jQuery('body').addClass('fullscreen');
@@ -258,6 +260,7 @@ if(hash.search("\#(document|pages|text)\/") != -1 || (%(fullscreen)s &&
             "search": str(search).lower(),
             "width": width,
             "data": json.dumps(self.dv_data()),
+            "zoom": self.request.get("dv_zoom_size", 700)  # can be set to 1000 to widen by default
         }
 
     def getTranslatedJSLabels(self):

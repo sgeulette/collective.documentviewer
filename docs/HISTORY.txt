@@ -1,6 +1,14 @@
 Changelog
 =========
 
+3.0.4 (unreleased)
+------------------
+
+- blacked and isorted code
+  [sgeulette]
+- Added zoom parameter when initializing the viewer. So it can be widened.
+  [sgeulette]
+
 3.0.3 (2015-07-29)
 ------------------
 
