@@ -231,12 +231,18 @@ class DocumentViewerView(BrowserView):
         return """
 window.documentData = %(data)s;
 var hash = window.location.hash;
+function get_dv_cookie(name, defaultValue = null) {
+    var value = "; " + document.cookie;
+    var parts = value.split("; " + name + "=");
+    if (parts.length == 2) return parts.pop().split(";").shift();
+    return defaultValue;
+}
 window.initializeDV = function(){
 /* We do this so we can reload it later when managing annotations */
     window.currentDocument = DV.load(window.documentData, { %(height)s
         sidebar: %(sidebar)s,
         width: %(width)s,
-        zoom: %(zoom)s,
+        zoom: get_dv_cookie("dv_zoom_size", defaultValue=700),
         search: %(search)s,
         container: '#DV-container' });
 }
@@ -244,7 +250,7 @@ if(hash.search("\#(document|pages|text)\/") != -1 || (%(fullscreen)s &&
         hash != '#bypass-fullscreen')){
     window.currentDocument = DV.load(window.documentData, {
         sidebar: true,
-        zoom: %(zoom)s,
+        zoom: get_dv_cookie("dv_zoom_size", defaultValue=700),
         search: %(search)s,
         container: document.body });
     jQuery('body').addClass('fullscreen');
@@ -260,7 +266,6 @@ if(hash.search("\#(document|pages|text)\/") != -1 || (%(fullscreen)s &&
             "search": str(search).lower(),
             "width": width,
             "data": json.dumps(self.dv_data()),
-            "zoom": self.request.get("dv_zoom_size", 700)  # can be set to 1000 to widen by default
         }
 
     def getTranslatedJSLabels(self):
