@@ -234,7 +234,7 @@ var hash = window.location.hash;
 function get_dv_cookie(name, defaultValue = null) {
     var value = "; " + document.cookie;
     var parts = value.split("; " + name + "=");
-    if (parts.length == 2) return parts.pop().split(";").shift();
+    if (parts.length == 2) return parseInt(parts.pop().split(";").shift());
     return defaultValue;
 }
 window.initializeDV = function(){
