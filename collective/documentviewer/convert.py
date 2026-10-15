@@ -4,6 +4,7 @@ from collective.documentviewer import storage
 from collective.documentviewer.events import ConversionFinishedEvent
 from collective.documentviewer.interfaces import IFileWrapper
 from collective.documentviewer.interfaces import IOCRLanguage
+from collective.documentviewer.interfaces import IPageTextCleaner
 from collective.documentviewer.settings import GlobalSettings
 from collective.documentviewer.settings import Settings
 from collective.documentviewer.utils import getDocumentType
@@ -422,9 +423,16 @@ class Converter(object):
         logger.info('indexing pdf %s' % repr(self.context))
         text_dir = os.path.join(self.storage_dir, TEXT_REL_PATHNAME)
         dump_path = DUMP_FILENAME.rsplit('.', 1)[0]
+        cleaner = IPageTextCleaner(self.context, None)
         for page_num in range(1, pages + 1):
             filepath = os.path.join(text_dir, "%s_%i.txt" % (
                 dump_path, page_num))
+            if cleaner is not None and os.path.exists(filepath):
+                # the cleaned text is also the one stored and displayed
+                with open(filepath) as fi:
+                    text = cleaner.clean(fi.read())
+                with open(filepath, 'w') as fi:
+                    fi.write(text)
             page = Page(page_num, filepath)
             catalog.index_doc(page_num, page)
 

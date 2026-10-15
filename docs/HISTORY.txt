@@ -8,6 +8,8 @@ Changelog
   [sgeulette]
 - Added zoom parameter when initializing the viewer. So it can be widened.
   [sgeulette]
+- Added `IPageTextCleaner` adapter, to clean the page texts before they are stored and indexed (PARAF-183).
+  [chris-adam]
 
 3.0.3 (2015-07-29)
 ------------------
