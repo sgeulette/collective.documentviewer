@@ -281,7 +281,7 @@ class IOCRLanguage(Interface):
 
 class IPageTextCleaner(Interface):
     """Adapter interface that cleans the text of a page
-    before its indexation.
+    before it is stored and indexed.
     """
 
     def clean(text):

@@ -41,10 +41,9 @@ LARGE_PDF_SIZE = 10000
 
 
 class Page(object):
-    def __init__(self, page, filepath, cleaner=None):
+    def __init__(self, page, filepath):
         self.page = page
         self.filepath = filepath
-        self.cleaner = cleaner
 
     @property
     def contents(self):
@@ -53,8 +52,6 @@ class Page(object):
             text = fi.read()
             fi.close()
             text = unicode(text, errors='ignore').encode('utf-8')
-            if self.cleaner is not None:
-                text = self.cleaner.clean(text)
             # let's strip out the ugly...
             text = word_re.sub(' ', text).strip()
             return ' '.join([word for word in text.split() if len(word) > 3])
@@ -430,7 +427,13 @@ class Converter(object):
         for page_num in range(1, pages + 1):
             filepath = os.path.join(text_dir, "%s_%i.txt" % (
                 dump_path, page_num))
-            page = Page(page_num, filepath, cleaner)
+            if cleaner is not None and os.path.exists(filepath):
+                # the cleaned text is also the one stored and displayed
+                with open(filepath) as fi:
+                    text = cleaner.clean(fi.read())
+                with open(filepath, 'w') as fi:
+                    fi.write(text)
+            page = Page(page_num, filepath)
             catalog.index_doc(page_num, page)
 
     def handle_storage(self):
