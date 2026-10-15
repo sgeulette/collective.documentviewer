@@ -4,6 +4,7 @@ from collective.documentviewer import storage
 from collective.documentviewer.events import ConversionFinishedEvent
 from collective.documentviewer.interfaces import IFileWrapper
 from collective.documentviewer.interfaces import IOCRLanguage
+from collective.documentviewer.interfaces import IPageTextCleaner
 from collective.documentviewer.settings import GlobalSettings
 from collective.documentviewer.settings import Settings
 from collective.documentviewer.utils import getDocumentType
@@ -40,9 +41,10 @@ LARGE_PDF_SIZE = 10000
 
 
 class Page(object):
-    def __init__(self, page, filepath):
+    def __init__(self, page, filepath, cleaner=None):
         self.page = page
         self.filepath = filepath
+        self.cleaner = cleaner
 
     @property
     def contents(self):
@@ -51,6 +53,8 @@ class Page(object):
             text = fi.read()
             fi.close()
             text = unicode(text, errors='ignore').encode('utf-8')
+            if self.cleaner is not None:
+                text = self.cleaner.clean(text)
             # let's strip out the ugly...
             text = word_re.sub(' ', text).strip()
             return ' '.join([word for word in text.split() if len(word) > 3])
@@ -422,10 +426,11 @@ class Converter(object):
         logger.info('indexing pdf %s' % repr(self.context))
         text_dir = os.path.join(self.storage_dir, TEXT_REL_PATHNAME)
         dump_path = DUMP_FILENAME.rsplit('.', 1)[0]
+        cleaner = IPageTextCleaner(self.context, None)
         for page_num in range(1, pages + 1):
             filepath = os.path.join(text_dir, "%s_%i.txt" % (
                 dump_path, page_num))
-            page = Page(page_num, filepath)
+            page = Page(page_num, filepath, cleaner)
             catalog.index_doc(page_num, page)
 
     def handle_storage(self):
@@ -641,3 +646,25 @@ def runConversion(context):
     """
     converter = Converter(context)
     return converter()
+
+
+def rebuildTextCatalog(context):
+    """
+    Rebuild the text catalog from the page texts kept in blob storage.
+    Return False when they are missing (file storage, cleaned files).
+    """
+    settings = Settings(context)
+    blob_files = settings.blob_files or {}
+    dump_path = DUMP_FILENAME.rsplit('.', 1)[0]
+    blobs = [blob_files.get('%s/%s_%i.txt' % (TEXT_REL_PATHNAME, dump_path, page_num))
+             for page_num in range(1, (settings.num_pages or 0) + 1)]
+    if settings.catalog is None or not blobs or None in blobs:
+        return False
+    cleaner = IPageTextCleaner(context, None)
+    catalog = CatalogFactory()
+    for page_num, blob in enumerate(blobs, 1):
+        bfile = openBlob(blob)
+        catalog.index_doc(page_num, Page(page_num, bfile.name, cleaner))
+        bfile.close()
+    settings.catalog = catalog
+    return True

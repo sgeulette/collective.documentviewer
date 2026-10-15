@@ -279,6 +279,15 @@ class IOCRLanguage(Interface):
         """
 
 
+class IPageTextCleaner(Interface):
+    """Adapter interface that cleans the text of a page
+    before its indexation.
+    """
+
+    def clean(text):
+        """Return the page text without what must not be searchable"""
+
+
 class IFileWrapper(Interface):
     has_enclosure = Attribute("If object has enclosure")
     file = Attribute("BlobWrapper or NamedFile")
