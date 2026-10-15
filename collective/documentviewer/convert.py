@@ -646,25 +646,3 @@ def runConversion(context):
     """
     converter = Converter(context)
     return converter()
-
-
-def rebuildTextCatalog(context):
-    """
-    Rebuild the text catalog from the page texts kept in blob storage.
-    Return False when they are missing (file storage, cleaned files).
-    """
-    settings = Settings(context)
-    blob_files = settings.blob_files or {}
-    dump_path = DUMP_FILENAME.rsplit('.', 1)[0]
-    blobs = [blob_files.get('%s/%s_%i.txt' % (TEXT_REL_PATHNAME, dump_path, page_num))
-             for page_num in range(1, (settings.num_pages or 0) + 1)]
-    if settings.catalog is None or not blobs or None in blobs:
-        return False
-    cleaner = IPageTextCleaner(context, None)
-    catalog = CatalogFactory()
-    for page_num, blob in enumerate(blobs, 1):
-        bfile = openBlob(blob)
-        catalog.index_doc(page_num, Page(page_num, bfile.name, cleaner))
-        bfile.close()
-    settings.catalog = catalog
-    return True
